@@ -1,13 +1,13 @@
 [package]
 name = "rtime"
-version = "0.2.0"
+version = "0.2.1"
 authors = ["maiquel <jleahred@gmail.com>"]
 description = "similar to linux time command but writting the elapsed time continuosly on screen"
 license = "GPL-3.0"
 homepage = "https://github.com/jleahred/rtime"
 repository = "https://github.com/jleahred/rtime"
 keywords = ["time", "bash", "command"]
-categories = ["tool::command"]
+categories = ["command-line-utilities"]
 
 [dependencies]
 termion = "1.5.1"
