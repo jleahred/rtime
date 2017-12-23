@@ -1,4 +1,4 @@
-// using args for command
+// add help
 //
 
 extern crate termion;
