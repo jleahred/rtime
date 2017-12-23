@@ -17,10 +17,15 @@ enum Print {
 }
 
 fn main() {
+    if std::env::args().count() == 1 {
+        panic!("missing command to execute");
+    }
+
+    let comm_vec: std::vec::Vec<_> = std::env::args().skip(1).collect();
     let comm = Command::new("sh")
         .arg("-c")
         //.arg("for i in $(seq 1 3); do sleep 3; echo line $i; done")   //  to test
-        .args(std::env::args().skip(1))
+        .arg(comm_vec.join(" "))
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()

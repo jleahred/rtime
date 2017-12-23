@@ -7,3 +7,9 @@ To use it
 ```sh
 cargo install rtime
 ```
+
+Example
+
+```sh
+rtime sleep 10
+```
