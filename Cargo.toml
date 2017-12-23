@@ -1,7 +1,15 @@
 [package]
-name = "jtime"
+name = "rtime"
 version = "0.1.0"
 authors = ["maiquel <jleahred@gmail.com>"]
+description = "similar to linux time command but writting the elapsed time continuosly on screen"
+license = "GPL-3.0"
+homepage = "https://github.com/jleahred/rtime"
+repository = "https://github.com/jleahred/rtime"
+keywords = ["time", "bash", "command"]
+categories = ["tool::command"]
 
 [dependencies]
-termion = "*"
+termion = "1.5.1"
+
+

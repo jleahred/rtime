@@ -1,4 +1,3 @@
-// pending stderr
 // using args for command
 //
 
@@ -11,18 +10,17 @@ use std::time::Duration;
 use std::thread;
 use std::sync::mpsc::sync_channel;
 
-
 enum Print {
     Line(String),
     ElapsedTime,
     Finished,
 }
 
-
 fn main() {
     let comm = Command::new("sh")
         .arg("-c")
-        .arg("for i in $(seq 1 3); do sleep 3; echo line $i; done")
+        //.arg("for i in $(seq 1 3); do sleep 3; echo line $i; done")   //  to test
+        .args(std::env::args().skip(1))
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
@@ -32,23 +30,10 @@ fn main() {
 
     let (sender, receiver) = sync_channel(1);
 
-    let sender_elapsed_time = sender.clone();
-    thread::spawn(move || {
-        loop {
-            thread::sleep(Duration::from_millis(500));
-            let _ = sender_elapsed_time.send(Print::ElapsedTime);
-        }
-    });
+    thread_send_print_elapsed_time(sender.clone());
+    thread_read_stdxxx(sender.clone(), comm.stdout.unwrap());
+    thread_read_stdxxx(sender.clone(), comm.stderr.unwrap());
 
-    let sender_stdout = sender.clone();
-    thread::spawn(move || {
-        let child_buf = std::io::BufReader::new(comm.stdout.unwrap());
-        for line in child_buf.lines() {
-            let _ = sender_stdout.send(Print::Line(line.unwrap()));
-            let _ = sender_stdout.send(Print::ElapsedTime);
-        }
-        let _ = sender_stdout.send(Print::Finished);
-    });
 
     for print in receiver.iter() {
         match print {
@@ -61,6 +46,31 @@ fn main() {
     println!("");
 }
 
+
+fn thread_read_stdxxx<OutErr>(sender: std::sync::mpsc::SyncSender<Print>, stdout: OutErr)
+where
+    OutErr: std::io::Read + std::marker::Send + std::marker::Sync + 'static,
+{
+    thread::spawn(move || {
+        let child_buf = std::io::BufReader::new(stdout);
+        for line in child_buf.lines() {
+            let _ = sender.send(Print::Line(line.unwrap()));
+            let _ = sender.send(Print::ElapsedTime);
+        }
+        let _ = sender.send(Print::Finished);
+    });
+}
+
+
+fn thread_send_print_elapsed_time(sender: std::sync::mpsc::SyncSender<Print>) {
+    thread::spawn(move || {
+        loop {
+            thread::sleep(Duration::from_millis(500));
+            let _ = sender.send(Print::ElapsedTime);
+        }
+    });
+}
+
 fn print_elapsed_time(start: &Instant) {
     use termion::clear;
     use termion::cursor::{self, DetectCursorPos};
@@ -70,11 +80,12 @@ fn print_elapsed_time(start: &Instant) {
 
     let mut stdout = MouseTerminal::from(io::stdout().into_raw_mode().unwrap());
     let (_, y) = stdout.cursor_pos().unwrap();
-    let _ = write!(stdout,
-                   "{}{}[{}s]",
-                   clear::CurrentLine,
-                   cursor::Goto(1, y),
-                   start.elapsed()
-                       .as_secs());
+    let _ = write!(
+        stdout,
+        "{}{}[{}s]",
+        clear::CurrentLine,
+        cursor::Goto(1, y),
+        start.elapsed().as_secs()
+    );
     let _ = stdout.flush();
 }

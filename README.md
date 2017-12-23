@@ -1,5 +1,9 @@
-# jtime
+# rtime
 
-On develop...
+Similar to Linux `time` command but writing the elapsed time continuously on screen
 
-similar to linux time command but writting the elapsed time continuosly on screen
+To use it
+
+```sh
+cargo install rtime
+```
