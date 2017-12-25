@@ -86,7 +86,7 @@ fn main() {
 
     let process_print = |status, print| match print {
         Print::ElapsedTime => print_elapsed_time(&start, status),
-        Print::Line(line) => print_line(&line, &start, status),
+        Print::Line(line) => print_line(&line, status),
         Print::FinishedTasks => finished_task(status),
     };
 
@@ -154,13 +154,13 @@ fn print_elapsed_time(start: &Instant, mut status: Status) -> Status {
     status
 }
 
-fn print_line(line: &str, start: &Instant, mut status: Status) -> Status {
+fn print_line(line: &str, mut status: Status) -> Status {
     if status.last_line == LastLine::Time {
         println!("");
     }
     println!("{}", line);
     status.last_line = LastLine::Output;
-    print_elapsed_time(start, status)
+    status
 }
 
 fn finished_task(mut status: Status) -> Status {

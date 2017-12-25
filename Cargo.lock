@@ -18,7 +18,7 @@ dependencies = [
 
 [[package]]
 name = "rtime"
-version = "0.3.3"
+version = "0.3.4"
 dependencies = [
  "termion 1.5.1 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
