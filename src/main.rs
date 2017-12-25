@@ -210,6 +210,5 @@ fn test_split_str_len() {
         split_str_len("123456789012", 4),
         vec!["1234", "5678", "9012"]
     );
-    println!("______________{:?}", split_str_len("1234567890", 4));
     assert_eq!(split_str_len("1234567890", 4), vec!["1234", "5678", "90"]);
 }
