@@ -1,10 +1,10 @@
 // TODO
-//  add help
-//  time format hh:mm:ss
 //  colors
-//  remove for loop
 
 // DONE
+//  remove for loop
+//  time format h:mm:ss
+//  add help
 //  avoid printing time on same second
 //  force print time at end
 
@@ -15,7 +15,8 @@ use std::process::{Command, Stdio};
 use std::time::Instant;
 use std::time::Duration;
 use std::thread;
-use std::sync::mpsc::sync_channel;
+use std::sync::mpsc::{sync_channel, Receiver, SyncSender};
+
 
 enum Print {
     Line(String),
@@ -26,7 +27,7 @@ enum Print {
 #[derive(Clone)]
 struct Seconds(u64);
 
-#[derive(Clone)]
+#[derive(Clone, PartialEq)]
 enum LastLine {
     Time,
     Output,
@@ -37,18 +38,37 @@ struct Status {
     last_line: LastLine,
     prev_seconds: Seconds,
     finished_tasks: u8,
+    sender_finished: SyncSender<()>,
+}
+
+impl Status {
+    fn init(send_finished: SyncSender<()>) -> Status {
+        Status {
+            last_line: LastLine::Output,
+            prev_seconds: Seconds(0),
+            finished_tasks: 0,
+            sender_finished: send_finished,
+        }
+    }
+    fn check_exit(self) -> Self {
+        if self.finished_tasks == 2 {
+            let _ = self.sender_finished.send(());
+        }
+        self
+    }
 }
 
 fn main() {
     if std::env::args().count() == 1 {
-        panic!("missing command to execute");
+        println!("missing command to execute");
+        println!("\nussage  jtime <command>\n\n");
+        return;
     }
 
     let comm_vec: std::vec::Vec<_> = std::env::args().skip(1).collect();
     let comm = Command::new("sh")
         .arg("-c")
-        //.arg("for i in $(seq 1 3); do sleep 3; echo line $i; done")   //  to test
-        .arg(comm_vec.join(" "))
+        .arg(format!("{0}", comm_vec.join(" ")))
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
@@ -56,42 +76,32 @@ fn main() {
 
     let start = Instant::now();
 
-    let (sender, receiver) = sync_channel(1);
+    let (send_print, recv_print) = sync_channel(1);
+    let (send_finished, recv_finished) = sync_channel(1);
 
-    thread_send_print_elapsed_time(sender.clone());
-    thread_read_stdxxx(sender.clone(), comm.stdout.unwrap());
-    thread_read_stdxxx(sender.clone(), comm.stderr.unwrap());
+    thread_read_stdxxx(send_print.clone(), comm.stdout.unwrap());
+    thread_read_stdxxx(send_print.clone(), comm.stderr.unwrap());
+    thread_send_print_elapsed_time(send_print.clone(), recv_finished);
+    drop(send_print);
 
-
-    let mut status = Status {
-        last_line: LastLine::Output,
-        prev_seconds: Seconds(0),
-        finished_tasks: 0,
+    let process_print = |status, print| match print {
+        Print::ElapsedTime => print_elapsed_time(&start, status),
+        Print::Line(line) => print_line(&line, status),
+        Print::FinishedTasks => finished_task(status),
     };
-    for print in receiver.iter() {
-        status = match print {
-            Print::ElapsedTime => print_elapsed_time(&start, &status),
-            Print::Line(line) => {
-                println!("{}", line);
-                status.last_line = LastLine::Output;
-                status
-            }
-            Print::FinishedTasks => {
-                status.finished_tasks += 1;
-                status
-            }
-        };
-        if status.finished_tasks == 2 {
-            break;
-        }
-    }
+
+    recv_print
+        .iter()
+        .fold(Status::init(send_finished), |status, received| {
+            process_print(status, received).check_exit()
+        });
 
     print_total_time(&start);
     println!("");
 }
 
 
-fn thread_read_stdxxx<OutErr>(sender: std::sync::mpsc::SyncSender<Print>, out_err: OutErr)
+fn thread_read_stdxxx<OutErr>(sender: SyncSender<Print>, out_err: OutErr)
 where
     OutErr: std::io::Read + std::marker::Send + std::marker::Sync + 'static,
 {
@@ -106,41 +116,69 @@ where
 }
 
 
-fn thread_send_print_elapsed_time(sender: std::sync::mpsc::SyncSender<Print>) {
+fn thread_send_print_elapsed_time(sender: SyncSender<Print>, recv_finished: Receiver<()>) {
     thread::spawn(move || {
         loop {
-            thread::sleep(Duration::from_millis(500));
-            let _ = sender.send(Print::ElapsedTime);
+            match recv_finished.recv_timeout(Duration::from_millis(500)) {
+                Ok(_) => break,
+                Err(_) => {
+                    let _ = sender.send(Print::ElapsedTime);
+                }
+            }
         }
     });
 }
 
-fn print_elapsed_time(start: &Instant, status: &Status) -> Status {
+fn print_elapsed_time(start: &Instant, mut status: Status) -> Status {
     use termion::clear;
     use termion::cursor::{self, DetectCursorPos};
     use termion::input::MouseTerminal;
     use termion::raw::IntoRawMode;
     use std::io::{self, Write};
 
-    let mut result = status.clone();
     let mut stdout = MouseTerminal::from(io::stdout().into_raw_mode().unwrap());
     let (_, y) = stdout.cursor_pos().unwrap();
-    let seconds = start.elapsed().as_secs();
-    if status.prev_seconds.0 != seconds {
+    let seconds = Seconds(start.elapsed().as_secs());
+    if status.prev_seconds.0 != seconds.0 {
         let _ = write!(
             stdout,
-            "{}{}[{}s]",
+            "{}{}[{}]",
             clear::CurrentLine,
             cursor::Goto(1, y),
-            seconds
+            get_string_time(&seconds)
         );
         let _ = stdout.flush();
-        result.last_line = LastLine::Time;
+        status.last_line = LastLine::Time;
     }
-    result.prev_seconds = Seconds(seconds);
-    result
+    status.prev_seconds = seconds;
+    status
+}
+
+fn print_line(line: &str, mut status: Status) -> Status {
+    if status.last_line == LastLine::Time {
+        println!("");
+    }
+    println!("{}", line);
+    status.last_line = LastLine::Output;
+    status
+}
+
+fn finished_task(mut status: Status) -> Status {
+    status.finished_tasks += 1;
+    status
 }
 
 fn print_total_time(start: &Instant) {
-    println!("\n>>>  Total time: {}  <<<", start.elapsed().as_secs());
+    println!(
+        "\n>>>  Total time: {}  <<<",
+        get_string_time(&Seconds(start.elapsed().as_secs()))
+    );
+}
+
+fn get_string_time(total_secs: &Seconds) -> String {
+    let div_rem = |dividend, divisor| (dividend / divisor, dividend % divisor);
+    let (total_minuts, seconds) = div_rem(total_secs.0, 60);
+    let (total_hours, minuts) = div_rem(total_minuts, 60);
+
+    format!("{}:{:02}:{:02}", total_hours, minuts, seconds)
 }
