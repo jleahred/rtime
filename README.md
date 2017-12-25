@@ -11,5 +11,7 @@ cargo install rtime
 Example
 
 ```sh
-rtime sleep 10
+rtime 'ls; sleep 3; echo "sadfasdfasdfasdfa fasdf asdf asdf asd fasd asd f asdf asdfsadf asdf "; sleep 4'
 ```
+
+![Example](/rtime_ex.png)
