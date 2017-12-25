@@ -85,8 +85,8 @@ fn main() {
     drop(send_print);
 
     let process_print = |status, print| match print {
-        Print::ElapsedTime => print_elapsed_time(&start, status),
-        Print::Line(line) => print_line(&line, status),
+        Print::ElapsedTime => print_elapsed_time(&start, status, false),
+        Print::Line(line) => print_line(&line, &start, status),
         Print::FinishedTasks => finished_task(status),
     };
 
@@ -129,7 +129,7 @@ fn thread_send_print_elapsed_time(sender: SyncSender<Print>, recv_finished: Rece
     });
 }
 
-fn print_elapsed_time(start: &Instant, mut status: Status) -> Status {
+fn print_elapsed_time(start: &Instant, mut status: Status, force: bool) -> Status {
     use termion::clear;
     use termion::cursor::{self, DetectCursorPos};
     use termion::input::MouseTerminal;
@@ -139,7 +139,7 @@ fn print_elapsed_time(start: &Instant, mut status: Status) -> Status {
     let mut stdout = MouseTerminal::from(io::stdout().into_raw_mode().unwrap());
     let (_, y) = stdout.cursor_pos().unwrap();
     let seconds = Seconds(start.elapsed().as_secs());
-    if status.prev_seconds.0 != seconds.0 {
+    if status.prev_seconds.0 != seconds.0 || force {
         let _ = write!(
             stdout,
             "{}{}  ---    [{}]    ---",
@@ -154,13 +154,13 @@ fn print_elapsed_time(start: &Instant, mut status: Status) -> Status {
     status
 }
 
-fn print_line(line: &str, mut status: Status) -> Status {
+fn print_line(line: &str, start: &Instant, mut status: Status) -> Status {
     if status.last_line == LastLine::Time {
         println!("");
     }
     println!("{}", line);
     status.last_line = LastLine::Output;
-    status
+    print_elapsed_time(start, status, true)
 }
 
 fn finished_task(mut status: Status) -> Status {
