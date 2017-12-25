@@ -142,7 +142,7 @@ fn print_elapsed_time(start: &Instant, mut status: Status) -> Status {
     if status.prev_seconds.0 != seconds.0 {
         let _ = write!(
             stdout,
-            "{}{}[{}]",
+            "{}{}  ---    [{}]    ---",
             clear::CurrentLine,
             cursor::Goto(1, y),
             get_string_time(&seconds)
