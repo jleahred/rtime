@@ -1,6 +1,6 @@
 [package]
 name = "rtime"
-version = "0.3.2"
+version = "0.3.3"
 authors = ["maiquel <jleahred@gmail.com>"]
 description = "similar to linux time command but writting the elapsed time continuosly on screen"
 license = "GPL-3.0"
