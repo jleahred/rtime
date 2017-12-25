@@ -17,6 +17,10 @@ use std::time::Duration;
 use std::thread;
 use std::sync::mpsc::{sync_channel, Receiver, SyncSender};
 
+use termion::cursor::DetectCursorPos;
+use termion::input::MouseTerminal;
+use termion::raw::IntoRawMode;
+
 
 enum Print {
     Line(String),
@@ -24,19 +28,9 @@ enum Print {
     FinishedTasks,
 }
 
-#[derive(Clone)]
-struct Seconds(u64);
 
-#[derive(Clone, PartialEq)]
-enum LastLine {
-    Time,
-    Output,
-}
-
-#[derive(Clone)]
 struct Status {
-    last_line: LastLine,
-    prev_seconds: Seconds,
+    start: Instant,
     finished_tasks: u8,
     sender_finished: SyncSender<()>,
 }
@@ -44,8 +38,7 @@ struct Status {
 impl Status {
     fn init(send_finished: SyncSender<()>) -> Status {
         Status {
-            last_line: LastLine::Output,
-            prev_seconds: Seconds(0),
+            start: Instant::now(),
             finished_tasks: 0,
             sender_finished: send_finished,
         }
@@ -59,6 +52,8 @@ impl Status {
 }
 
 fn main() {
+    println!("{:?}", termion::terminal_size());
+
     if std::env::args().count() == 1 {
         println!("missing command to execute");
         println!("\nussage  jtime <command>\n\n");
@@ -74,8 +69,6 @@ fn main() {
         .spawn()
         .unwrap();
 
-    let start = Instant::now();
-
     let (send_print, recv_print) = sync_channel(1);
     let (send_finished, recv_finished) = sync_channel(1);
 
@@ -85,7 +78,7 @@ fn main() {
     drop(send_print);
 
     let process_print = |status, print| match print {
-        Print::ElapsedTime => print_elapsed_time(&start, status),
+        Print::ElapsedTime => print_elapsed_time(status),
         Print::Line(line) => print_line(&line, status),
         Print::FinishedTasks => finished_task(status),
     };
@@ -96,8 +89,7 @@ fn main() {
             process_print(status, received).check_exit()
         });
 
-    print_total_time(&start);
-    println!("");
+    println!("\n");
 }
 
 
@@ -129,37 +121,52 @@ fn thread_send_print_elapsed_time(sender: SyncSender<Print>, recv_finished: Rece
     });
 }
 
-fn print_elapsed_time(start: &Instant, mut status: Status) -> Status {
-    use termion::clear;
-    use termion::cursor::{self, DetectCursorPos};
-    use termion::input::MouseTerminal;
-    use termion::raw::IntoRawMode;
+fn print_elapsed_time(status: Status) -> Status {
     use std::io::{self, Write};
 
     let mut stdout = MouseTerminal::from(io::stdout().into_raw_mode().unwrap());
     let (_, y) = stdout.cursor_pos().unwrap();
-    let seconds = Seconds(start.elapsed().as_secs());
-    if status.prev_seconds.0 != seconds.0 {
-        let _ = write!(
-            stdout,
-            "{}{}  ---    [{}]    ---",
-            clear::CurrentLine,
-            cursor::Goto(1, y),
-            get_string_time(&seconds)
-        );
-        let _ = stdout.flush();
-        status.last_line = LastLine::Time;
-    }
-    status.prev_seconds = seconds;
+    let _ = write!(
+        stdout,
+        "{}{}{} ...",
+        termion::clear::CurrentLine,
+        termion::cursor::Goto(1, y),
+        get_string_time(status.start.elapsed().as_secs()),
+    );
+    let _ = stdout.flush();
     status
 }
 
-fn print_line(line: &str, mut status: Status) -> Status {
-    if status.last_line == LastLine::Time {
-        println!("");
+fn print_line(line: &str, status: Status) -> Status {
+    let (width, _) = termion::terminal_size().unwrap();
+
+    let string_time = get_string_time(status.start.elapsed().as_secs());
+    let spaces = " ".repeat(string_time.len());
+
+    let vlines = split_str_len(line, width as usize - string_time.len() - 3);
+
+    fn write_line(l: &str, string_time: &str) {
+        let mut stdout = MouseTerminal::from(io::stdout().into_raw_mode().unwrap());
+        use std::io::{self, Write};
+        let (_, y) = stdout.cursor_pos().unwrap();
+        let _ = write!(
+            stdout,
+            "{}{}{} | {}\n",
+            termion::clear::CurrentLine,
+            termion::cursor::Goto(1, y),
+            string_time,
+            l
+        );
+        let _ = stdout.flush();
+    };
+
+    if vlines.len() > 0 {
+        write_line(&vlines[0], &string_time);
     }
-    println!("{}", line);
-    status.last_line = LastLine::Output;
+    vlines.iter().skip(1).fold((), |(), l| {
+        write_line(l, &spaces);
+    });
+
     status
 }
 
@@ -168,17 +175,41 @@ fn finished_task(mut status: Status) -> Status {
     status
 }
 
-fn print_total_time(start: &Instant) {
-    println!(
-        "\n>>>  Total time: {}  <<<",
-        get_string_time(&Seconds(start.elapsed().as_secs()))
-    );
+
+fn get_string_time(total_seconds: u64) -> String {
+    let div_rem = |dividend, divisor| (dividend / divisor, dividend % divisor);
+    let (total_minuts, seconds) = div_rem(total_seconds, 60);
+    match total_minuts > 0 {
+        true => format!("{:3 }m {}s", total_minuts, seconds),
+        false => format!("{}s", seconds),
+    }
 }
 
-fn get_string_time(total_secs: &Seconds) -> String {
-    let div_rem = |dividend, divisor| (dividend / divisor, dividend % divisor);
-    let (total_minuts, seconds) = div_rem(total_secs.0, 60);
-    let (total_hours, minuts) = div_rem(total_minuts, 60);
+fn split_str_len(s: &str, len: usize) -> Vec<String> {
+    fn split_(s: &str, len: usize, mut v: Vec<String>) -> (String, Vec<String>) {
+        let split_on = match len < s.len() {
+            true => len,
+            false => s.len(),
+        };
+        match s.len() {
+            0 => (s.to_owned(), v),
+            _ => {
+                let (l, r) = s.split_at(split_on);
+                v.push(l.to_owned());
+                split_(r, len, v)
+            }
+        }
+    }
+    let (_, v) = split_(s, len, vec![]);
+    v
+}
 
-    format!("{}:{:02}:{:02}", total_hours, minuts, seconds)
+#[test]
+fn test_split_str_len() {
+    assert_eq!(
+        split_str_len("123456789012", 4),
+        vec!["1234", "5678", "9012"]
+    );
+    println!("______________{:?}", split_str_len("1234567890", 4));
+    assert_eq!(split_str_len("1234567890", 4), vec!["1234", "5678", "90"]);
 }
