@@ -1,0 +1,12 @@
+// TODO
+//  concurrent error using two threads for stdout and stderr
+//  split lines by size without vec
+//  work with tokio
+//  colors
+
+// DONE
+//  remove for loop
+//  time format h:mm:ss
+//  add help
+//  avoid printing time on same second
+//  force print time at end

@@ -1,13 +1,3 @@
-// TODO
-//  colors
-
-// DONE
-//  remove for loop
-//  time format h:mm:ss
-//  add help
-//  avoid printing time on same second
-//  force print time at end
-
 extern crate termion;
 
 use std::io::BufRead;
@@ -17,7 +7,6 @@ use std::time::Duration;
 use std::thread;
 use std::sync::mpsc::{sync_channel, Receiver, SyncSender};
 
-use termion::cursor::DetectCursorPos;
 use termion::input::MouseTerminal;
 use termion::raw::IntoRawMode;
 
@@ -67,13 +56,19 @@ fn main() {
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
-        .unwrap();
+        .expect("Problem running the command");
 
     let (send_print, recv_print) = sync_channel(1);
     let (send_finished, recv_finished) = sync_channel(1);
 
-    thread_read_stdxxx(send_print.clone(), comm.stdout.unwrap());
-    thread_read_stdxxx(send_print.clone(), comm.stderr.unwrap());
+    thread_read_stdxxx(
+        send_print.clone(),
+        comm.stdout.expect("Error getting stdout"),
+    );
+    thread_read_stdxxx(
+        send_print.clone(),
+        comm.stderr.expect("Error getting stderr"),
+    );
     thread_send_print_elapsed_time(send_print.clone(), recv_finished);
     drop(send_print);
 
@@ -100,7 +95,7 @@ where
     thread::spawn(move || {
         let child_buf = std::io::BufReader::new(out_err);
         for line in child_buf.lines() {
-            let _ = sender.send(Print::Line(line.unwrap()));
+            let _ = sender.send(Print::Line(line.unwrap_or("".to_owned())));
             let _ = sender.send(Print::ElapsedTime);
         }
         let _ = sender.send(Print::FinishedTasks);
@@ -109,13 +104,11 @@ where
 
 
 fn thread_send_print_elapsed_time(sender: SyncSender<Print>, recv_finished: Receiver<()>) {
-    thread::spawn(move || {
-        loop {
-            match recv_finished.recv_timeout(Duration::from_millis(250)) {
-                Ok(_) => break,
-                Err(_) => {
-                    let _ = sender.send(Print::ElapsedTime);
-                }
+    thread::spawn(move || loop {
+        match recv_finished.recv_timeout(Duration::from_millis(250)) {
+            Ok(_) => break,
+            Err(_) => {
+                let _ = sender.send(Print::ElapsedTime);
             }
         }
     });
@@ -124,48 +117,64 @@ fn thread_send_print_elapsed_time(sender: SyncSender<Print>, recv_finished: Rece
 fn print_elapsed_time(status: Status) -> Status {
     use std::io::{self, Write};
 
-    let mut stdout = MouseTerminal::from(io::stdout().into_raw_mode().unwrap());
-    let (_, y) = stdout.cursor_pos().unwrap();
-    let _ = write!(
-        stdout,
-        "{}{}{} ...",
-        termion::clear::CurrentLine,
-        termion::cursor::Goto(1, y),
-        get_string_time(status.start.elapsed().as_secs()),
-    );
-    let _ = stdout.flush();
+    let iostdout = io::stdout()
+        .into_raw_mode()
+        .and_then(|iostdout| Ok(MouseTerminal::from(iostdout)));
+
+    match iostdout {
+        Ok(mut stdout) => {
+            let _ = write!(
+                stdout,
+                "\r{}{} ...",
+                termion::clear::CurrentLine,
+                get_string_time(status.start.elapsed().as_secs()),
+            );
+            let _ = stdout.flush();
+        }
+        _ => (),
+    }
+
     status
 }
 
 fn print_line(line: &str, status: Status) -> Status {
-    let (width, _) = termion::terminal_size().unwrap();
-
-    let string_time = get_string_time(status.start.elapsed().as_secs());
-    let spaces = " ".repeat(string_time.len());
-
-    let vlines = split_str_len(line, width as usize - string_time.len() - 3);
-
     fn write_line(l: &str, string_time: &str) {
-        let mut stdout = MouseTerminal::from(io::stdout().into_raw_mode().unwrap());
         use std::io::{self, Write};
-        let (_, y) = stdout.cursor_pos().unwrap();
-        let _ = write!(
-            stdout,
-            "{}{}{} | {}\n",
-            termion::clear::CurrentLine,
-            termion::cursor::Goto(1, y),
-            string_time,
-            l
-        );
-        let _ = stdout.flush();
+
+        let iostdout = io::stdout()
+            .into_raw_mode()
+            .and_then(|iostdout| Ok(MouseTerminal::from(iostdout)));
+
+        match iostdout {
+            Ok(mut stdout) => {
+                let _ = write!(
+                    stdout,
+                    "\r{}{}|{}\n",
+                    termion::clear::CurrentLine,
+                    string_time,
+                    l
+                );
+                let _ = stdout.flush();
+            }
+            _ => (),
+        }
     };
 
-    if vlines.len() > 0 {
-        write_line(&vlines[0], &string_time);
+    match termion::terminal_size() {
+        Ok((width, _)) => {
+            let string_time = get_string_time(status.start.elapsed().as_secs());
+            let spaces = " ".repeat(string_time.len());
+
+            let vlines = split_str_len(line, width as usize - string_time.len() - 1);
+            if vlines.len() > 0 {
+                write_line(&vlines[0], &string_time);
+            }
+            vlines.iter().skip(1).fold((), |(), l| {
+                write_line(l, &spaces);
+            });
+        }
+        _ => (),
     }
-    vlines.iter().skip(1).fold((), |(), l| {
-        write_line(l, &spaces);
-    });
 
     status
 }
@@ -180,7 +189,7 @@ fn get_string_time(total_seconds: u64) -> String {
     let div_rem = |dividend, divisor| (dividend / divisor, dividend % divisor);
     let (total_minuts, seconds) = div_rem(total_seconds, 60);
     match total_minuts > 0 {
-        true => format!("{:3 }m {}s", total_minuts, seconds),
+        true => format!("{}m{:02}s", total_minuts, seconds),
         false => format!("{}s", seconds),
     }
 }
