@@ -14,7 +14,7 @@ use termion::raw::IntoRawMode;
 enum Print {
     Line(String),
     ElapsedTime,
-    FinishedTasks,
+    FinishedTask,
 }
 
 
@@ -41,8 +41,6 @@ impl Status {
 }
 
 fn main() {
-    println!("{:?}", termion::terminal_size());
-
     if std::env::args().count() == 1 {
         println!("missing command to execute");
         println!("\nussage  jtime <command>\n\n");
@@ -75,7 +73,7 @@ fn main() {
     let process_print = |status, print| match print {
         Print::ElapsedTime => print_elapsed_time(status),
         Print::Line(line) => print_line(&line, status),
-        Print::FinishedTasks => finished_task(status),
+        Print::FinishedTask => finished_task(status),
     };
 
     recv_print
@@ -98,17 +96,19 @@ where
             let _ = sender.send(Print::Line(line.unwrap_or("".to_owned())));
             let _ = sender.send(Print::ElapsedTime);
         }
-        let _ = sender.send(Print::FinishedTasks);
+        let _ = sender.send(Print::FinishedTask);
     });
 }
 
 
 fn thread_send_print_elapsed_time(sender: SyncSender<Print>, recv_finished: Receiver<()>) {
-    thread::spawn(move || loop {
-        match recv_finished.recv_timeout(Duration::from_millis(250)) {
-            Ok(_) => break,
-            Err(_) => {
-                let _ = sender.send(Print::ElapsedTime);
+    thread::spawn(move || {
+        loop {
+            match recv_finished.recv_timeout(Duration::from_millis(250)) {
+                Ok(_) => break,
+                Err(_) => {
+                    let _ = sender.send(Print::ElapsedTime);
+                }
             }
         }
     });
@@ -188,9 +188,11 @@ fn finished_task(mut status: Status) -> Status {
 fn get_string_time(total_seconds: u64) -> String {
     let div_rem = |dividend, divisor| (dividend / divisor, dividend % divisor);
     let (total_minuts, seconds) = div_rem(total_seconds, 60);
-    match total_minuts > 0 {
-        true => format!("{}m{:02}s", total_minuts, seconds),
-        false => format!("{}s", seconds),
+    let (total_hours, minuts) = div_rem(total_minuts, 60);
+    match (total_hours > 0, total_minuts > 0) {
+        (true, _) => format!("{}h{:02}m{:02}s", total_hours, total_minuts, seconds),
+        (false, true) => format!("{}m{:02}s", minuts, seconds),
+        (false, false) => format!("{}s", seconds),
     }
 }
 
