@@ -1,7 +1,8 @@
 extern crate termion;
 
+
 use std::io::BufRead;
-use std::process::{Command, Stdio};
+use std::process::{Child, Command, Stdio};
 use std::time::Instant;
 use std::time::Duration;
 use std::thread;
@@ -9,96 +10,116 @@ use std::sync::mpsc::{sync_channel, Receiver, SyncSender};
 
 use termion::input::MouseTerminal;
 use termion::raw::IntoRawMode;
+use std::os::unix::io::FromRawFd;
+use std::os::unix::io::IntoRawFd;
 
+use std::fs;
+
+use std::os::unix::net::{UnixListener, UnixStream};
 
 enum Print {
     Line(String),
     ElapsedTime,
-    FinishedTask,
 }
 
 
 struct Status {
     start: Instant,
-    finished_tasks: u8,
-    sender_finished: SyncSender<()>,
 }
 
 impl Status {
-    fn init(send_finished: SyncSender<()>) -> Status {
+    fn init() -> Status {
         Status {
             start: Instant::now(),
-            finished_tasks: 0,
-            sender_finished: send_finished,
         }
-    }
-    fn check_exit(self) -> Self {
-        if self.finished_tasks == 2 {
-            let _ = self.sender_finished.send(());
-        }
-        self
     }
 }
 
 fn main() {
     if std::env::args().count() == 1 {
         println!("missing command to execute");
-        println!("\nussage  jtime <command>\n\n");
+        println!("\nussage  rtime <command>\n\n");
         return;
     }
-
-    let comm_vec: std::vec::Vec<_> = std::env::args().skip(1).collect();
-    let comm = Command::new("sh")
-        .arg("-c")
-        .arg(format!("{0}", comm_vec.join(" ")))
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .expect("Problem running the command");
 
     let (send_print, recv_print) = sync_channel(1);
     let (send_finished, recv_finished) = sync_channel(1);
 
-    thread_read_stdxxx(
-        send_print.clone(),
-        comm.stdout.expect("Error getting stdout"),
-    );
-    thread_read_stdxxx(
-        send_print.clone(),
-        comm.stderr.expect("Error getting stderr"),
-    );
+    let (unix_listener, stream) = create_unix_stream();
+
+
+    //  create command to execute
+    let comm_vec: std::vec::Vec<_> = std::env::args().skip(1).collect();
+    let child_proc = Command::new("sh")
+        .arg("-c")
+        .arg(format!("{0}", comm_vec.join(" ")))
+        .stdout(unsafe { Stdio::from_raw_fd(stream.try_clone().unwrap().into_raw_fd()) })
+        .stderr(unsafe { Stdio::from_raw_fd(stream.try_clone().unwrap().into_raw_fd()) })
+        //.stdout(Stdio::piped())
+        //.stderr(Stdio::piped())
+        .spawn()
+        .expect("Problem running the command");
+
+    thread_notif_end(child_proc, send_finished.clone(), stream);
+    thread_read_socket(unix_listener, send_print.clone());
     thread_send_print_elapsed_time(send_print.clone(), recv_finished);
     drop(send_print);
 
     let process_print = |status, print| match print {
         Print::ElapsedTime => print_elapsed_time(status),
         Print::Line(line) => print_line(&line, status),
-        Print::FinishedTask => finished_task(status),
     };
 
-    recv_print
-        .iter()
-        .fold(Status::init(send_finished), |status, received| {
-            process_print(status, received).check_exit()
-        });
+    recv_print.iter().fold(Status::init(), |status, received| {
+        process_print(status, received)
+    });
 
     println!("\n");
 }
 
 
-fn thread_read_stdxxx<OutErr>(sender: SyncSender<Print>, out_err: OutErr)
-where
-    OutErr: std::io::Read + std::marker::Send + std::marker::Sync + 'static,
-{
+fn thread_notif_end(mut child_proc: Child, send_finished: SyncSender<()>, mut stream: UnixStream) {
     thread::spawn(move || {
-        let child_buf = std::io::BufReader::new(out_err);
-        for line in child_buf.lines() {
-            let _ = sender.send(Print::Line(line.unwrap_or("".to_owned())));
-            let _ = sender.send(Print::ElapsedTime);
-        }
-        let _ = sender.send(Print::FinishedTask);
+        use std::io::prelude::*;
+        let _ = child_proc.wait();
+        let _ = send_finished.send(());
+        let _ = stream.write_all(b"__RTIME_END__");
     });
 }
+
+
+fn create_unix_stream() -> (UnixListener, UnixStream) {
+    use std::path::Path;
+
+    let socket_path = Path::new("/tmp/rtime");
+    if socket_path.exists() {
+        fs::remove_file(&socket_path).unwrap();
+    }
+    let ul = UnixListener::bind(&socket_path).expect("failed to bind socket");
+    let us = UnixStream::connect(&socket_path).unwrap();
+    (ul, us)
+}
+
+
+fn thread_read_socket(unix_listener: UnixListener, send_print: SyncSender<Print>) {
+    thread::spawn(move || {
+        match unix_listener.accept() {
+            Ok((socket, _)) => {
+                let child_buf = std::io::BufReader::new(socket);
+                for line in child_buf.lines() {
+                    let line_s = line.unwrap_or("".to_owned());
+                    if line_s == "__RTIME_END__".to_owned() {
+                        break;
+                    }
+                    let _ = send_print.clone().send(Print::Line(line_s));
+                    let _ = send_print.clone().send(Print::ElapsedTime);
+                }
+            }
+            Err(_) => { /* connection failed */ }
+        }
+    });
+}
+
 
 
 fn thread_send_print_elapsed_time(sender: SyncSender<Print>, recv_finished: Receiver<()>) {
@@ -176,11 +197,6 @@ fn print_line(line: &str, status: Status) -> Status {
         _ => (),
     }
 
-    status
-}
-
-fn finished_task(mut status: Status) -> Status {
-    status.finished_tasks += 1;
     status
 }
 

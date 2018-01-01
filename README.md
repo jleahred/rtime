@@ -15,3 +15,9 @@ rtime 'ls; sleep 3; echo "sadfasdfasdfasdfa fasdf asdf asdf asd fasd asd f asdf 
 ```
 
 ![Example](/rtime_ex.png)
+
+Example with stdout and stderr
+
+```sh
+rtime 'echo 1; echo 2; >&2 echo  3; >&2 echo 4; echo 5; echo 6; echo 7; echo 8'
+```
