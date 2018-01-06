@@ -1,10 +1,11 @@
 // TODO
-//  concurrent error using two threads for stdout and stderr
+//  autocomplete
 //  split lines by size without vec
 //  work with tokio
-//  colors
+//  colors???
 
 // DONE
+//  concurrent error using two threads for stdout and stderr
 //  remove for loop
 //  time format h:mm:ss
 //  add help

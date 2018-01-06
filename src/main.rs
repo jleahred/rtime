@@ -1,19 +1,13 @@
 extern crate termion;
 
 
-use std::io::BufRead;
 use std::process::{Child, Command, Stdio};
 use std::time::Instant;
-use std::time::Duration;
 use std::thread;
 use std::sync::mpsc::{sync_channel, Receiver, SyncSender};
 
 use termion::input::MouseTerminal;
 use termion::raw::IntoRawMode;
-use std::os::unix::io::FromRawFd;
-use std::os::unix::io::IntoRawFd;
-
-use std::fs;
 
 use std::os::unix::net::{UnixListener, UnixStream};
 
@@ -36,6 +30,9 @@ impl Status {
 }
 
 fn main() {
+    use std::os::unix::io::FromRawFd;
+    use std::os::unix::io::IntoRawFd;
+
     if std::env::args().count() == 1 {
         println!("missing command to execute");
         println!("\nussage  rtime <command>\n\n");
@@ -89,6 +86,8 @@ fn thread_notif_end(mut child_proc: Child, send_finished: SyncSender<()>, mut st
 
 
 fn create_unix_stream() -> (UnixListener, UnixStream) {
+    use std::fs;
+
     use std::path::Path;
 
     let socket_path = Path::new("/tmp/rtime");
@@ -102,6 +101,8 @@ fn create_unix_stream() -> (UnixListener, UnixStream) {
 
 
 fn thread_read_socket(unix_listener: UnixListener, send_print: SyncSender<Print>) {
+    use std::io::BufRead;
+
     thread::spawn(move || {
         match unix_listener.accept() {
             Ok((socket, _)) => {
@@ -123,6 +124,8 @@ fn thread_read_socket(unix_listener: UnixListener, send_print: SyncSender<Print>
 
 
 fn thread_send_print_elapsed_time(sender: SyncSender<Print>, recv_finished: Receiver<()>) {
+    use std::time::Duration;
+
     thread::spawn(move || {
         loop {
             match recv_finished.recv_timeout(Duration::from_millis(250)) {
