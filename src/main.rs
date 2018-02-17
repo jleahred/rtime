@@ -209,7 +209,7 @@ fn get_string_time(total_seconds: u64) -> String {
     let (total_minuts, seconds) = div_rem(total_seconds, 60);
     let (total_hours, minuts) = div_rem(total_minuts, 60);
     match (total_hours > 0, total_minuts > 0) {
-        (true, _) => format!("{}h{:02}m{:02}s", total_hours, total_minuts, seconds),
+        (true, _) => format!("{}h{:02}m{:02}s", total_hours, minuts, seconds),
         (false, true) => format!("{}m{:02}s", minuts, seconds),
         (false, false) => format!("{}s", seconds),
     }
